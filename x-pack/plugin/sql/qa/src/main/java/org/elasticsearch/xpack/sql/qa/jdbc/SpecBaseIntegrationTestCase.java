@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.URL;
+import java.net.URLConnection;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -65,7 +66,7 @@ public abstract class SpecBaseIntegrationTestCase extends JdbcIntegrationTestCas
     }
 
     protected void loadDataset(RestClient client) throws Exception {
-        DataLoader.loadEmpDatasetIntoEs(client);
+        DataLoader.loadDatasetIntoEs(client);
     }
 
     @Override
@@ -89,8 +90,8 @@ public abstract class SpecBaseIntegrationTestCase extends JdbcIntegrationTestCas
         try {
             assumeFalse("Test marked as Ignored", testName.endsWith("-Ignore"));
             doTest();
-        } catch (AssertionError ae) {
-            throw reworkException(ae);
+        } catch (Exception e) {
+            throw reworkException(e);
         }
     }
 
@@ -216,6 +217,9 @@ public abstract class SpecBaseIntegrationTestCase extends JdbcIntegrationTestCas
 
     @SuppressForbidden(reason = "test reads from jar")
     public static InputStream readFromJarUrl(URL source) throws IOException {
-        return source.openStream();
+        URLConnection con = source.openConnection();
+        // do not to cache files (to avoid keeping file handles around)
+        con.setUseCaches(false);
+        return con.getInputStream();
     }
 }

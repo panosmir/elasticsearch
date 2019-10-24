@@ -6,11 +6,14 @@
 package org.elasticsearch.xpack.sql.parser;
 
 import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.xpack.sql.TestUtils;
 import org.elasticsearch.xpack.sql.expression.Expression;
 import org.elasticsearch.xpack.sql.expression.Literal;
 import org.elasticsearch.xpack.sql.expression.function.UnresolvedFunction;
 import org.elasticsearch.xpack.sql.expression.function.scalar.Cast;
 import org.elasticsearch.xpack.sql.expression.literal.Interval;
+import org.elasticsearch.xpack.sql.expression.predicate.conditional.Case;
+import org.elasticsearch.xpack.sql.expression.predicate.conditional.IfConditional;
 import org.elasticsearch.xpack.sql.expression.predicate.operator.arithmetic.Add;
 import org.elasticsearch.xpack.sql.expression.predicate.operator.arithmetic.Mul;
 import org.elasticsearch.xpack.sql.expression.predicate.operator.arithmetic.Neg;
@@ -26,6 +29,7 @@ import java.time.temporal.TemporalAmount;
 import java.util.Locale;
 
 import static java.lang.String.format;
+import static org.hamcrest.Matchers.startsWith;
 
 public class ExpressionTests extends ESTestCase {
 
@@ -199,10 +203,39 @@ public class ExpressionTests extends ESTestCase {
         Expression expr = parser.createExpression("- 6");
         assertEquals(Literal.class, expr.getClass());
         assertEquals("- 6", expr.sourceText());
+        assertEquals(-6, expr.fold());
+
+        expr = parser.createExpression("- ( 6.134 )");
+        assertEquals(Literal.class, expr.getClass());
+        assertEquals("- ( 6.134 )", expr.sourceText());
+        assertEquals(-6.134, expr.fold());
+
+        expr = parser.createExpression("- ( ( (1.25) )    )");
+        assertEquals(Literal.class, expr.getClass());
+        assertEquals("- ( ( (1.25) )    )", expr.sourceText());
+        assertEquals(-1.25, expr.fold());
+
+        int numberOfParentheses = randomIntBetween(3, 10);
+        double value = randomDouble();
+        StringBuilder sb = new StringBuilder("-");
+        for (int i = 0; i < numberOfParentheses; i++) {
+            sb.append("(").append(TestUtils.randomWhitespaces());
+        }
+        sb.append(value);
+        for (int i = 0; i < numberOfParentheses; i++) {
+            sb.append(")");
+            if (i < numberOfParentheses - 1) {
+                sb.append(TestUtils.randomWhitespaces());
+            }
+        }
+        expr = parser.createExpression(sb.toString());
+        assertEquals(Literal.class, expr.getClass());
+        assertEquals(sb.toString(), expr.sourceText());
+        assertEquals(- value, expr.fold());
     }
 
     public void testComplexArithmetic() {
-        String sql = "-(((a-2)-(-3))+b)";
+        String sql = "-(((a-2)- (( - ( (  3)  )) )  )+ b)";
         Expression expr = parser.createExpression(sql);
         assertEquals(Neg.class, expr.getClass());
         Neg neg = (Neg) expr;
@@ -210,15 +243,15 @@ public class ExpressionTests extends ESTestCase {
         assertEquals(1, neg.children().size());
         assertEquals(Add.class, neg.children().get(0).getClass());
         Add add = (Add) neg.children().get(0);
-        assertEquals("((a-2)-(-3))+b", add.sourceText());
+        assertEquals("((a-2)- (( - ( (  3)  )) )  )+ b", add.sourceText());
         assertEquals(2, add.children().size());
         assertEquals("?b", add.children().get(1).toString());
         assertEquals(Sub.class, add.children().get(0).getClass());
         Sub sub1 = (Sub) add.children().get(0);
-        assertEquals("(a-2)-(-3)", sub1.sourceText());
+        assertEquals("(a-2)- (( - ( (  3)  )) )", sub1.sourceText());
         assertEquals(2, sub1.children().size());
         assertEquals(Literal.class, sub1.children().get(1).getClass());
-        assertEquals("-3", sub1.children().get(1).sourceText());
+        assertEquals("- ( (  3)  )", sub1.children().get(1).sourceText());
         assertEquals(Sub.class, sub1.children().get(0).getClass());
         Sub sub2 = (Sub) sub1.children().get(0);
         assertEquals(2, sub2.children().size());
@@ -398,12 +431,7 @@ public class ExpressionTests extends ESTestCase {
         assertEquals(1, ur.children().size());
         Expression child = ur.children().get(0);
         assertEquals(Literal.class, child.getClass());
-        assertEquals(Short.valueOf((short) 4), child.fold());
-    }
-
-    public void testCurrentTimestampInvalidPrecision() {
-        ParsingException ex = expectThrows(ParsingException.class, () -> parser.createExpression("CURRENT_TIMESTAMP(100)"));
-        assertEquals("line 1:20: Precision needs to be between [0-9], received [100]", ex.getMessage());
+        assertEquals(4, child.fold());
     }
 
     public void testCurrentDate() {
@@ -438,12 +466,7 @@ public class ExpressionTests extends ESTestCase {
         assertEquals(1, ur.children().size());
         Expression child = ur.children().get(0);
         assertEquals(Literal.class, child.getClass());
-        assertEquals(Short.valueOf((short) 7), child.fold());
-    }
-
-    public void testCurrentTimeInvalidPrecision() {
-        ParsingException ex = expectThrows(ParsingException.class, () -> parser.createExpression("CURRENT_TIME(100)"));
-        assertEquals("line 1:15: Precision needs to be between [0-9], received [100]", ex.getMessage());
+        assertEquals(7, child.fold());
     }
 
     public void testSourceKeyword() {
@@ -456,5 +479,64 @@ public class ExpressionTests extends ESTestCase {
         String s = "PerCentile_RaNK(fOO,    12 )";
         Expression expr = parser.createExpression(s);
         assertEquals(s, expr.sourceText());
+    }
+
+    public void testCaseWithoutOperand() {
+        Expression expr = parser.createExpression(
+            "CASE WHEN a = 1 THEN 'one'" +
+            "     WHEN a > 2 THEN 'a few'" +
+            "     WHEN a > 10 THEN 'many' " +
+            "END");
+
+        assertEquals(Case.class, expr.getClass());
+        Case c = (Case) expr;
+        assertEquals(3, c.conditions().size());
+        IfConditional ifc = c.conditions().get(0);
+        assertEquals("WHEN a = 1 THEN 'one'", ifc.sourceText());
+        assertThat(ifc.condition().toString(), startsWith("Equals[?a,1]#"));
+        assertEquals("'one'=one", ifc.result().toString());
+        assertEquals(Literal.NULL, c.elseResult());
+
+        expr = parser.createExpression(
+            "CASE WHEN a = 1 THEN 'one'" +
+            "     WHEN a <= 2 THEN 'a few'" +
+            "ELSE 'many' " +
+            "END");
+
+        assertEquals(Case.class, expr.getClass());
+        c = (Case) expr;
+        assertEquals(2, c.conditions().size());
+        ifc = c.conditions().get(0);
+        assertEquals("WHEN a = 1 THEN 'one'", ifc.sourceText());
+        assertEquals("'many'=many", c.elseResult().toString());
+    }
+
+    public void testCaseWithOperand() {
+        Expression expr = parser.createExpression(
+            "CASE a WHEN 1 THEN 'one'" +
+            "       WHEN 2 THEN 'two'" +
+            "       WHEN 3 THEN 'three' " +
+            "END");
+
+        assertEquals(Case.class, expr.getClass());
+        Case c = (Case) expr;
+        assertEquals(3, c.conditions().size());
+        IfConditional ifc = c.conditions().get(0);
+        assertEquals("WHEN 1 THEN 'one'", ifc.sourceText());
+        assertThat(ifc.condition().toString(), startsWith("Equals[?a,1]#"));
+        assertEquals("'one'=one", ifc.result().toString());
+        assertEquals(Literal.NULL, c.elseResult());
+
+        expr = parser.createExpression(
+            "CASE a WHEN 1 THEN 'one'" +
+            "       WHEN 2 THEN 'two'" +
+            "ELSE 'many' " +
+            "END");
+        assertEquals(Case.class, expr.getClass());
+        c = (Case) expr;
+        assertEquals(2, c.conditions().size());
+        ifc = c.conditions().get(0);
+        assertEquals("WHEN 1 THEN 'one'", ifc.sourceText());
+        assertEquals("'many'=many", c.elseResult().toString());
     }
 }

@@ -10,30 +10,30 @@ import org.elasticsearch.Version;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.ResponseException;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
+import org.elasticsearch.common.xcontent.DeprecationHandler;
+import org.elasticsearch.common.xcontent.NamedXContentRegistry;
 import org.elasticsearch.common.xcontent.ObjectPath;
+import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.XContentType;
+import org.elasticsearch.common.xcontent.json.JsonXContent;
 import org.elasticsearch.common.xcontent.support.XContentMapValues;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.rest.action.search.RestSearchAction;
 import org.elasticsearch.test.StreamsUtils;
 import org.elasticsearch.test.rest.ESRestTestCase;
 import org.elasticsearch.upgrades.AbstractFullClusterRestartTestCase;
-import org.elasticsearch.xpack.core.upgrade.UpgradeField;
-import org.elasticsearch.xpack.core.watcher.client.WatchSourceBuilder;
-import org.elasticsearch.xpack.security.support.SecurityIndexManager;
-import org.elasticsearch.xpack.watcher.actions.index.IndexAction;
-import org.elasticsearch.xpack.watcher.actions.logging.LoggingAction;
-import org.elasticsearch.xpack.watcher.common.text.TextTemplate;
-import org.elasticsearch.xpack.watcher.condition.InternalAlwaysCondition;
-import org.elasticsearch.xpack.watcher.trigger.schedule.IntervalSchedule;
-import org.elasticsearch.xpack.watcher.trigger.schedule.ScheduleTrigger;
+import org.elasticsearch.xpack.core.slm.SnapshotLifecyclePolicy;
+import org.elasticsearch.xpack.slm.SnapshotLifecycleStats;
 import org.hamcrest.Matcher;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -53,6 +53,9 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.startsWith;
 
 public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
+
+    public static final int UPGRADE_FIELD_EXPECTED_INDEX_FORMAT_VERSION = 6;
+    public static final int SECURITY_EXPECTED_INDEX_FORMAT_VERSION = 6;
 
     @Override
     protected Settings restClientSettings() {
@@ -106,7 +109,7 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
                 if (settingsMap.containsKey("index")) {
                     @SuppressWarnings("unchecked")
                     int format = Integer.parseInt(String.valueOf(((Map<String, Object>)settingsMap.get("index")).get("format")));
-                    assertEquals("The security index needs to be upgraded", SecurityIndexManager.INTERNAL_INDEX_FORMAT, format);
+                    assertEquals("The security index needs to be upgraded", SECURITY_EXPECTED_INDEX_FORMAT_VERSION, format);
                 }
             }
 
@@ -120,16 +123,12 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
     }
 
     @SuppressWarnings("unchecked")
-    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/40178")
     public void testWatcher() throws Exception {
         if (isRunningAgainstOldCluster()) {
             logger.info("Adding a watch on old cluster {}", getOldClusterVersion());
             Request createBwcWatch = new Request("PUT", getWatcherEndpoint() + "/watch/bwc_watch");
             Request createBwcThrottlePeriod = new Request("PUT", getWatcherEndpoint() + "/watch/bwc_throttle_period");
-            if (getOldClusterVersion().onOrAfter(Version.V_7_0_0)) {
-                createBwcWatch.setOptions(expectWarnings(IndexAction.TYPES_DEPRECATION_MESSAGE));
-                createBwcThrottlePeriod.setOptions(expectWarnings(IndexAction.TYPES_DEPRECATION_MESSAGE));
-            }
+
             createBwcWatch.setJsonEntity(loadWatch("simple-watch.json"));
             client().performRequest(createBwcWatch);
 
@@ -166,7 +165,7 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
                 logger.info("settings map {}", settingsMap);
                 if (settingsMap.containsKey("index")) {
                     int format = Integer.parseInt(String.valueOf(((Map<String, Object>)settingsMap.get("index")).get("format")));
-                    assertEquals("The watches index needs to be upgraded", UpgradeField.EXPECTED_INDEX_FORMAT_VERSION, format);
+                    assertEquals("The watches index needs to be upgraded", UPGRADE_FIELD_EXPECTED_INDEX_FORMAT_VERSION, format);
                 }
             }
 
@@ -207,7 +206,6 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
      * Tests that a RollUp job created on a old cluster is correctly restarted after the upgrade.
      */
     public void testRollupAfterRestart() throws Exception {
-        assumeTrue("Rollup can be tested with 6.3.0 and onwards", getOldClusterVersion().onOrAfter(Version.V_6_3_0));
         if (isRunningAgainstOldCluster()) {
             final int numDocs = 59;
             final int year = randomIntBetween(1970, 2018);
@@ -232,6 +230,13 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
             // create the rollup job
             final Request createRollupJobRequest = new Request("PUT", getRollupEndpoint() + "/job/rollup-job-test");
 
+            String intervalType;
+            if (getOldClusterVersion().onOrAfter(Version.V_7_2_0)) {
+                intervalType = "fixed_interval";
+            } else {
+                intervalType = "interval";
+            }
+
             createRollupJobRequest.setJsonEntity("{"
                     + "\"index_pattern\":\"rollup-*\","
                     + "\"rollup_index\":\"results-rollup\","
@@ -240,7 +245,7 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
                     + "\"groups\":{"
                     + "    \"date_histogram\":{"
                     + "        \"field\":\"timestamp\","
-                    + "        \"interval\":\"5m\""
+                    + "        \"" + intervalType + "\":\"5m\""
                     + "      }"
                     + "},"
                     + "\"metrics\":["
@@ -263,21 +268,51 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
             final Request clusterHealthRequest = new Request("GET", "/_cluster/health");
             clusterHealthRequest.addParameter("wait_for_status", "yellow");
             clusterHealthRequest.addParameter("wait_for_no_relocating_shards", "true");
-            if (getOldClusterVersion().onOrAfter(Version.V_6_2_0)) {
-                clusterHealthRequest.addParameter("wait_for_no_initializing_shards", "true");
-            }
+            clusterHealthRequest.addParameter("wait_for_no_initializing_shards", "true");
             Map<String, Object> clusterHealthResponse = entityAsMap(client().performRequest(clusterHealthRequest));
             assertThat(clusterHealthResponse.get("timed_out"), equalTo(Boolean.FALSE));
 
             assertRollUpJob("rollup-job-test");
         }
     }
+    
+    public void testSlmStats() throws IOException {
+        SnapshotLifecyclePolicy slmPolicy = new SnapshotLifecyclePolicy("test-policy", "test-policy", "* * * 31 FEB ? *", "test-repo",
+            Collections.singletonMap("indices", Collections.singletonList("*")), null);
+        if (isRunningAgainstOldCluster() && getOldClusterVersion().onOrAfter(Version.V_7_4_0)) {
+            Request createRepoRequest = new Request("PUT", "_snapshot/test-repo");
+            String repoCreateJson = "{" +
+                " \"type\": \"fs\"," +
+                " \"settings\": {" +
+                "   \"location\": \"test-repo\"" +
+                "  }" +
+                "}";
+            createRepoRequest.setJsonEntity(repoCreateJson);
+            Request createSlmPolicyRequest = new Request("PUT", "_slm/policy/test-policy");
+            try (XContentBuilder builder = JsonXContent.contentBuilder()) {
+                String createSlmPolicyJson = Strings.toString(slmPolicy.toXContent(builder, null));
+                createSlmPolicyRequest.setJsonEntity(createSlmPolicyJson);
+            }
+
+            client().performRequest(createRepoRequest);
+            client().performRequest(createSlmPolicyRequest);
+        }
+
+        if (isRunningAgainstOldCluster() == false || getOldClusterVersion().onOrAfter(Version.V_7_5_0)) {
+            Response response = client().performRequest(new Request("GET", "_slm/stats"));
+            XContentType xContentType = XContentType.fromMediaTypeOrFormat(response.getEntity().getContentType().getValue());
+            try (XContentParser parser = xContentType.xContent().createParser(NamedXContentRegistry.EMPTY,
+                DeprecationHandler.THROW_UNSUPPORTED_OPERATION, response.getEntity().getContent())) {
+                assertEquals(new SnapshotLifecycleStats(), SnapshotLifecycleStats.parse(parser));
+            }
+        }
+
+    }
 
     private String loadWatch(String watch) throws IOException {
         return StreamsUtils.copyToStringFromClasspath("/org/elasticsearch/xpack/restart/" + watch);
     }
 
-    @SuppressWarnings("unchecked")
     private void assertOldTemplatesAreDeleted() throws IOException {
         Map<String, Object> templates = entityAsMap(client().performRequest(new Request("GET", "/_template")));
         assertThat(templates.keySet(), not(hasItems(is("watches"), startsWith("watch-history"), is("triggered_watches"))));
@@ -287,11 +322,6 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
     private void assertWatchIndexContentsWork() throws Exception {
         // Fetch a basic watch
         Request getRequest = new Request("GET", "_watcher/watch/bwc_watch");
-        getRequest.setOptions(
-            expectWarnings(
-                IndexAction.TYPES_DEPRECATION_MESSAGE
-            )
-        );
 
         Map<String, Object> bwcWatch = entityAsMap(client().performRequest(getRequest));
 
@@ -308,11 +338,6 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
 
         // Fetch a watch with "fun" throttle periods
         getRequest = new Request("GET", "_watcher/watch/bwc_throttle_period");
-        getRequest.setOptions(
-            expectWarnings(
-                IndexAction.TYPES_DEPRECATION_MESSAGE
-            )
-        );
 
         bwcWatch = entityAsMap(client().performRequest(getRequest));
         assertThat(bwcWatch.get("found"), equalTo(true));
@@ -352,10 +377,9 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
 
     private void assertBasicWatchInteractions() throws Exception {
 
-        String watch = new WatchSourceBuilder()
-                .condition(InternalAlwaysCondition.INSTANCE)
-                .trigger(ScheduleTrigger.builder(new IntervalSchedule(IntervalSchedule.Interval.seconds(1))))
-                .addAction("awesome", LoggingAction.builder(new TextTemplate("test"))).buildAsBytes(XContentType.JSON).utf8ToString();
+        String watch = "{\"trigger\":{\"schedule\":{\"interval\":\"1s\"}},\"input\":{\"none\":{}}," +
+            "\"condition\":{\"always\":{}}," +
+            "\"actions\":{\"awesome\":{\"logging\":{\"level\":\"info\",\"text\":\"test\"}}}}";
         Request createWatchRequest = new Request("PUT", "_watcher/watch/new_watch");
         createWatchRequest.setJsonEntity(watch);
         Map<String, Object> createWatch = entityAsMap(client().performRequest(createWatchRequest));
@@ -382,9 +406,7 @@ public class FullClusterRestartIT extends AbstractFullClusterRestartTestCase {
         request.addParameter("wait_for_status", "yellow");
         request.addParameter("timeout", "30s");
         request.addParameter("wait_for_no_relocating_shards", "true");
-        if (getOldClusterVersion().onOrAfter(Version.V_6_2_0)) {
-            request.addParameter("wait_for_no_initializing_shards", "true");
-        }
+        request.addParameter("wait_for_no_initializing_shards", "true");
         Map<String, Object> response = entityAsMap(client().performRequest(request));
         assertThat(response.get("timed_out"), equalTo(Boolean.FALSE));
     }

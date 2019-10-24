@@ -25,11 +25,7 @@ import org.elasticsearch.cluster.metadata.RepositoryMetaData;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.blobstore.BlobPath;
 import org.elasticsearch.common.blobstore.BlobStore;
-import org.elasticsearch.common.logging.DeprecationLogger;
-import org.elasticsearch.common.settings.SecureSetting;
-import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.common.settings.Setting;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.xcontent.NamedXContentRegistry;
@@ -55,15 +51,8 @@ import java.util.function.Function;
  */
 class S3Repository extends BlobStoreRepository {
     private static final Logger logger = LogManager.getLogger(S3Repository.class);
-    private static final DeprecationLogger deprecationLogger = new DeprecationLogger(logger);
 
     static final String TYPE = "s3";
-
-    /** The access key to authenticate with s3. This setting is insecure because cluster settings are stored in cluster state */
-    static final Setting<SecureString> ACCESS_KEY_SETTING = SecureSetting.insecureString("access_key");
-
-    /** The secret key to authenticate with s3. This setting is insecure because cluster settings are stored in cluster state */
-    static final Setting<SecureString> SECRET_KEY_SETTING = SecureSetting.insecureString("secret_key");
 
     /**
      * Default is to use 100MB (S3 defaults) for heaps above 2GB and 5% of
@@ -125,7 +114,7 @@ class S3Repository extends BlobStoreRepository {
 
     /**
      * Sets the S3 storage class type for the backup files. Values may be standard, reduced_redundancy,
-     * standard_ia and intelligent_tiering. Defaults to standard.
+     * standard_ia, onezone_ia and intelligent_tiering. Defaults to standard.
      */
     static final Setting<String> STORAGE_CLASS_SETTING = Setting.simpleString("storage_class");
 
@@ -150,8 +139,6 @@ class S3Repository extends BlobStoreRepository {
 
     private final ByteSizeValue chunkSize;
 
-    private final BlobPath basePath;
-
     private final boolean serverSideEncryption;
 
     private final String storageClass;
@@ -161,11 +148,12 @@ class S3Repository extends BlobStoreRepository {
     /**
      * Constructs an s3 backed repository
      */
-    S3Repository(final RepositoryMetaData metadata,
-                 final Settings settings,
-                 final NamedXContentRegistry namedXContentRegistry,
-                 final S3Service service, final ThreadPool threadPool) {
-        super(metadata, settings, namedXContentRegistry, threadPool);
+    S3Repository(
+        final RepositoryMetaData metadata,
+        final NamedXContentRegistry namedXContentRegistry,
+        final S3Service service,
+        final ThreadPool threadPool) {
+        super(metadata, namedXContentRegistry, threadPool, buildBasePath(metadata));
         this.service = service;
 
         // Parse and validate the user's S3 Storage Class setting
@@ -183,23 +171,10 @@ class S3Repository extends BlobStoreRepository {
                 ") can't be lower than " + BUFFER_SIZE_SETTING.getKey() + " (" + bufferSize + ").");
         }
 
-        final String basePath = BASE_PATH_SETTING.get(metadata.settings());
-        if (Strings.hasLength(basePath)) {
-            this.basePath = new BlobPath().add(basePath);
-        } else {
-            this.basePath = BlobPath.cleanPath();
-        }
-
         this.serverSideEncryption = SERVER_SIDE_ENCRYPTION_SETTING.get(metadata.settings());
 
         this.storageClass = STORAGE_CLASS_SETTING.get(metadata.settings());
         this.cannedACL = CANNED_ACL_SETTING.get(metadata.settings());
-
-        if (S3ClientSettings.checkDeprecatedCredentials(metadata.settings())) {
-            // provided repository settings
-            deprecationLogger.deprecated("Using s3 access/secret key from repository settings. Instead "
-                    + "store these in named clients and the elasticsearch keystore for secure settings.");
-        }
 
         logger.debug(
                 "using bucket [{}], chunk_size [{}], server_side_encryption [{}], buffer_size [{}], cannedACL [{}], storageClass [{}]",
@@ -211,6 +186,15 @@ class S3Repository extends BlobStoreRepository {
                 storageClass);
     }
 
+    private static BlobPath buildBasePath(RepositoryMetaData metadata) {
+        final String basePath = BASE_PATH_SETTING.get(metadata.settings());
+        if (Strings.hasLength(basePath)) {
+            return new BlobPath().add(basePath);
+        } else {
+            return BlobPath.cleanPath();
+        }
+    }
+
     @Override
     protected S3BlobStore createBlobStore() {
         return new S3BlobStore(service, bucket, serverSideEncryption, bufferSize, cannedACL, storageClass, metadata);
@@ -218,19 +202,8 @@ class S3Repository extends BlobStoreRepository {
 
     // only use for testing
     @Override
-    protected BlobStore blobStore() {
-        return super.blobStore();
-    }
-
-    // only use for testing
-    @Override
     protected BlobStore getBlobStore() {
         return super.getBlobStore();
-    }
-
-    @Override
-    protected BlobPath basePath() {
-        return basePath;
     }
 
     @Override

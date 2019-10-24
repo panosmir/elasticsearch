@@ -20,6 +20,7 @@
 package org.elasticsearch.search.geo;
 
 import com.carrotsearch.randomizedtesting.generators.RandomNumbers;
+
 import org.apache.lucene.geo.GeoTestUtil;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexRequest;
@@ -95,7 +96,7 @@ public class GeoShapeQueryTests extends ESSingleNodeTestCase {
 
         client().prepareIndex("test", "type1", "aNullshape").setSource("{\"location\": null}", XContentType.JSON)
             .setRefreshPolicy(IMMEDIATE).get();
-        GetResponse result = client().prepareGet("test", "type1", "aNullshape").get();
+        GetResponse result = client().prepareGet("test", "aNullshape").get();
         assertThat(result.getField("location"), nullValue());
     }
 
@@ -122,7 +123,7 @@ public class GeoShapeQueryTests extends ESSingleNodeTestCase {
 
         EnvelopeBuilder shape = new EnvelopeBuilder(new Coordinate(-45, 45), new Coordinate(45, -45));
 
-        SearchResponse searchResponse = client().prepareSearch("test").setTypes("type1")
+        SearchResponse searchResponse = client().prepareSearch("test")
                 .setQuery(geoIntersectionQuery("location", shape))
                 .get();
 
@@ -131,7 +132,7 @@ public class GeoShapeQueryTests extends ESSingleNodeTestCase {
         assertThat(searchResponse.getHits().getHits().length, equalTo(1));
         assertThat(searchResponse.getHits().getAt(0).getId(), equalTo("1"));
 
-        searchResponse = client().prepareSearch("test").setTypes("type1")
+        searchResponse = client().prepareSearch("test")
                 .setQuery(geoShapeQuery("location", shape))
                 .get();
 
@@ -167,7 +168,7 @@ public class GeoShapeQueryTests extends ESSingleNodeTestCase {
 
         // This search would fail if both geoshape indexing and geoshape filtering
         // used the bottom-level optimization in SpatialPrefixTree#recursiveGetNodes.
-        SearchResponse searchResponse = client().prepareSearch("test").setTypes("type1")
+        SearchResponse searchResponse = client().prepareSearch("test")
                 .setQuery(geoIntersectionQuery("location", query))
                 .get();
 
@@ -233,7 +234,7 @@ public class GeoShapeQueryTests extends ESSingleNodeTestCase {
                 .endObject()).setRefreshPolicy(IMMEDIATE).get();
 
         SearchResponse searchResponse = client().prepareSearch("test")
-                .setQuery(geoIntersectionQuery("location", "Big_Rectangle", "shape_type"))
+                .setQuery(geoIntersectionQuery("location", "Big_Rectangle"))
                 .get();
 
         assertSearchResponse(searchResponse);
@@ -242,7 +243,7 @@ public class GeoShapeQueryTests extends ESSingleNodeTestCase {
         assertThat(searchResponse.getHits().getAt(0).getId(), equalTo("1"));
 
         searchResponse = client().prepareSearch("test")
-                .setQuery(geoShapeQuery("location", "Big_Rectangle", "shape_type"))
+                .setQuery(geoShapeQuery("location", "Big_Rectangle"))
                 .get();
 
         assertSearchResponse(searchResponse);
@@ -625,7 +626,7 @@ public class GeoShapeQueryTests extends ESSingleNodeTestCase {
         }
 
         // test that point was inserted
-        SearchResponse response = client().prepareSearch("geo_points_only").setTypes("type1")
+        SearchResponse response = client().prepareSearch("geo_points_only")
                 .setQuery(geoIntersectionQuery("location", shape))
                 .get();
 
@@ -659,7 +660,7 @@ public class GeoShapeQueryTests extends ESSingleNodeTestCase {
             .setRefreshPolicy(IMMEDIATE).get();
 
         // test that point was inserted
-        SearchResponse response = client().prepareSearch("geo_points_only").setTypes("type1")
+        SearchResponse response = client().prepareSearch("geo_points_only")
             .setQuery(matchAllQuery())
             .get();
 
@@ -709,15 +710,15 @@ public class GeoShapeQueryTests extends ESSingleNodeTestCase {
 
         String doc1 = "{\"geo\": {\r\n" + "\"coordinates\": [\r\n" + "-33.918711,\r\n" + "18.847685\r\n" + "],\r\n" +
                 "\"type\": \"Point\"\r\n" + "}}";
-        client().index(new IndexRequest("test", "doc", "1").source(doc1, XContentType.JSON).setRefreshPolicy(IMMEDIATE)).actionGet();
+        client().index(new IndexRequest("test").id("1").source(doc1, XContentType.JSON).setRefreshPolicy(IMMEDIATE)).actionGet();
 
         String doc2 = "{\"geo\": {\r\n" + "\"coordinates\": [\r\n" + "-49.0,\r\n" + "18.847685\r\n" + "],\r\n" +
             "\"type\": \"Point\"\r\n" + "}}";
-        client().index(new IndexRequest("test", "doc", "2").source(doc2, XContentType.JSON).setRefreshPolicy(IMMEDIATE)).actionGet();
+        client().index(new IndexRequest("test").id("2").source(doc2, XContentType.JSON).setRefreshPolicy(IMMEDIATE)).actionGet();
 
         String doc3 = "{\"geo\": {\r\n" + "\"coordinates\": [\r\n" + "49.0,\r\n" + "18.847685\r\n" + "],\r\n" +
             "\"type\": \"Point\"\r\n" + "}}";
-        client().index(new IndexRequest("test", "doc", "3").source(doc3, XContentType.JSON).setRefreshPolicy(IMMEDIATE)).actionGet();
+        client().index(new IndexRequest("test").id("3").source(doc3, XContentType.JSON).setRefreshPolicy(IMMEDIATE)).actionGet();
 
         @SuppressWarnings("unchecked") CheckedSupplier<GeoShapeQueryBuilder, IOException> querySupplier = randomFrom(
             () -> QueryBuilders.geoShapeQuery(

@@ -19,6 +19,7 @@
 package org.elasticsearch.search.aggregations.bucket;
 
 import com.carrotsearch.hppc.LongHashSet;
+
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchPhaseExecutionException;
@@ -30,6 +31,7 @@ import org.elasticsearch.script.MockScriptPlugin;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptType;
 import org.elasticsearch.search.aggregations.AggregationExecutionException;
+import org.elasticsearch.search.aggregations.BucketOrder;
 import org.elasticsearch.search.aggregations.InternalAggregation;
 import org.elasticsearch.search.aggregations.bucket.filter.Filter;
 import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
@@ -38,7 +40,6 @@ import org.elasticsearch.search.aggregations.metrics.Avg;
 import org.elasticsearch.search.aggregations.metrics.Max;
 import org.elasticsearch.search.aggregations.metrics.Stats;
 import org.elasticsearch.search.aggregations.metrics.Sum;
-import org.elasticsearch.search.aggregations.BucketOrder;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.hamcrest.Matchers;
 
@@ -139,7 +140,7 @@ public class HistogramIT extends ESIntegTestCase {
         List<IndexRequestBuilder> builders = new ArrayList<>();
 
         for (int i = 0; i < numDocs; i++) {
-            builders.add(client().prepareIndex("idx", "type").setSource(jsonBuilder()
+            builders.add(client().prepareIndex("idx").setSource(jsonBuilder()
                     .startObject()
                     .field(SINGLE_VALUED_FIELD_NAME, i + 1)
                     .startArray(MULTI_VALUED_FIELD_NAME).value(i + 1).value(i + 2).endArray()
@@ -183,26 +184,26 @@ public class HistogramIT extends ESIntegTestCase {
         assertAcked(client().admin().indices().prepareCreate("sort_idx")
             .addMapping("type", SINGLE_VALUED_FIELD_NAME, "type=double").get());
         for (int i = 1; i <= 3; i++) {
-            builders.add(client().prepareIndex("sort_idx", "type").setSource(
+            builders.add(client().prepareIndex("sort_idx").setSource(
                 jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME, 1).field("l", 1).field("d", i).endObject()));
-            builders.add(client().prepareIndex("sort_idx", "type").setSource(
+            builders.add(client().prepareIndex("sort_idx").setSource(
                 jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME, 2).field("l", 2).field("d", i).endObject()));
         }
-        builders.add(client().prepareIndex("sort_idx", "type").setSource(
+        builders.add(client().prepareIndex("sort_idx").setSource(
             jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME, 3).field("l", 3).field("d", 1).endObject()));
-        builders.add(client().prepareIndex("sort_idx", "type").setSource(
+        builders.add(client().prepareIndex("sort_idx").setSource(
             jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME, 3.8).field("l", 3).field("d", 2).endObject()));
-        builders.add(client().prepareIndex("sort_idx", "type").setSource(
+        builders.add(client().prepareIndex("sort_idx").setSource(
             jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME, 4).field("l", 3).field("d", 1).endObject()));
-        builders.add(client().prepareIndex("sort_idx", "type").setSource(
+        builders.add(client().prepareIndex("sort_idx").setSource(
             jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME, 4.4).field("l", 3).field("d", 3).endObject()));
-        builders.add(client().prepareIndex("sort_idx", "type").setSource(
+        builders.add(client().prepareIndex("sort_idx").setSource(
             jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME, 5).field("l", 5).field("d", 1).endObject()));
-        builders.add(client().prepareIndex("sort_idx", "type").setSource(
+        builders.add(client().prepareIndex("sort_idx").setSource(
             jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME, 5.1).field("l", 5).field("d", 2).endObject()));
-        builders.add(client().prepareIndex("sort_idx", "type").setSource(
+        builders.add(client().prepareIndex("sort_idx").setSource(
             jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME, 6).field("l", 5).field("d", 1).endObject()));
-        builders.add(client().prepareIndex("sort_idx", "type").setSource(
+        builders.add(client().prepareIndex("sort_idx").setSource(
             jsonBuilder().startObject().field(SINGLE_VALUED_FIELD_NAME, 7).field("l", 5).field("d", 1).endObject()));
     }
 
@@ -1178,7 +1179,6 @@ public class HistogramIT extends ESIntegTestCase {
     private void assertMultiSortResponse(long[] expectedKeys, BucketOrder... order) {
         SearchResponse response = client()
             .prepareSearch("sort_idx")
-            .setTypes("type")
             .addAggregation(
                 histogram("histo").field(SINGLE_VALUED_FIELD_NAME).interval(1).order(BucketOrder.compound(order))
                     .subAggregation(avg("avg_l").field("l")).subAggregation(sum("sum_d").field("d"))).get();

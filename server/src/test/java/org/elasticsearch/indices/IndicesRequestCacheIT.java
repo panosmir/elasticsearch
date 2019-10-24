@@ -34,7 +34,6 @@ import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
 import org.elasticsearch.search.aggregations.bucket.histogram.Histogram.Bucket;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.hamcrest.ElasticsearchAssertions;
-import org.elasticsearch.test.junit.annotations.TestLogging;
 
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -51,7 +50,6 @@ import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertSear
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThan;
 
-@TestLogging(value = "org.elasticsearch.indices.IndicesRequestCache:TRACE,org.elasticsearch.index.engine.Engine:DEBUG")
 public class IndicesRequestCacheIT extends ESIntegTestCase {
 
     // One of the primary purposes of the query cache is to cache aggs results
@@ -61,8 +59,8 @@ public class IndicesRequestCacheIT extends ESIntegTestCase {
                 .addMapping("type", "f", "type=date")
                 .setSettings(Settings.builder().put(IndicesRequestCache.INDEX_CACHE_REQUEST_ENABLED_SETTING.getKey(), true)).get());
         indexRandom(true,
-                client.prepareIndex("index", "type").setSource("f", "2014-03-10T00:00:00.000Z"),
-                client.prepareIndex("index", "type").setSource("f", "2014-05-13T00:00:00.000Z"));
+                client.prepareIndex("index").setSource("f", "2014-03-10T00:00:00.000Z"),
+                client.prepareIndex("index").setSource("f", "2014-05-13T00:00:00.000Z"));
         ensureSearchable("index");
 
         // This is not a random example: serialization with time zones writes shared strings

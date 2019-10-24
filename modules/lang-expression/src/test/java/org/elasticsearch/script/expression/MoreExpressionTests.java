@@ -28,8 +28,8 @@ import org.elasticsearch.common.lucene.search.function.CombineFunction;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.index.query.functionscore.ScoreFunctionBuilder;
 import org.elasticsearch.index.query.functionscore.ScoreFunctionBuilders;
+import org.elasticsearch.index.query.functionscore.ScriptScoreFunctionBuilder;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptType;
@@ -120,7 +120,7 @@ public class MoreExpressionTests extends ESIntegTestCase {
                 client().prepareIndex("test", "doc", "1").setSource("text", "hello goodbye"),
                 client().prepareIndex("test", "doc", "2").setSource("text", "hello hello hello goodbye"),
                 client().prepareIndex("test", "doc", "3").setSource("text", "hello hello goodebye"));
-        ScoreFunctionBuilder<?> score = ScoreFunctionBuilders.scriptFunction(
+        ScriptScoreFunctionBuilder score = ScoreFunctionBuilders.scriptFunction(
                 new Script(ScriptType.INLINE, "expression", "1 / _score", Collections.emptyMap()));
         SearchRequestBuilder req = client().prepareSearch().setIndices("test");
         req.setQuery(QueryBuilders.functionScoreQuery(QueryBuilders.termQuery("text", "hello"), score).boostMode(CombineFunction.REPLACE));
@@ -132,6 +132,15 @@ public class MoreExpressionTests extends ESIntegTestCase {
         assertEquals("1", hits.getAt(0).getId());
         assertEquals("3", hits.getAt(1).getId());
         assertEquals("2", hits.getAt(2).getId());
+
+        req = client().prepareSearch().setIndices("test");
+        req.setQuery(QueryBuilders.functionScoreQuery(QueryBuilders.termQuery("text", "hello"), score).boostMode(CombineFunction.REPLACE));
+        score = ScoreFunctionBuilders.scriptFunction(
+                new Script(ScriptType.INLINE, "expression", "1 / _score", Collections.emptyMap()));
+        req.addAggregation(AggregationBuilders.max("max_score").script((score).getScript()));
+        req.setSearchType(SearchType.DFS_QUERY_THEN_FETCH); // make sure DF is consistent
+        rsp = req.get();
+        assertSearchResponse(rsp);
     }
 
     public void testDateMethods() throws Exception {
@@ -512,7 +521,6 @@ public class MoreExpressionTests extends ESIntegTestCase {
             ensureGreen("test_index");
             indexRandom(true, client().prepareIndex("test_index", "doc", "1").setSource("text_field", "text"));
             UpdateRequestBuilder urb = client().prepareUpdate().setIndex("test_index");
-            urb.setType("doc");
             urb.setId("1");
             urb.setScript(new Script(ScriptType.INLINE, ExpressionScriptEngine.NAME, "0", Collections.emptyMap()));
             urb.get();

@@ -10,11 +10,12 @@ import org.elasticsearch.cluster.metadata.AliasMetaData;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.plugins.Plugin;
+import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.xpack.core.XPackSettings;
 import org.elasticsearch.xpack.core.ml.annotations.AnnotationIndex;
 import org.elasticsearch.xpack.ml.LocalStateMachineLearning;
 import org.elasticsearch.xpack.ml.MlSingleNodeTestCase;
-import org.elasticsearch.xpack.ml.notifications.Auditor;
+import org.elasticsearch.xpack.ml.notifications.AnomalyDetectionAuditor;
 import org.junit.Before;
 
 import java.util.Collection;
@@ -51,13 +52,12 @@ public class AnnotationIndexIT extends MlSingleNodeTestCase {
         }
     }
 
-    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/40933")
     public void testCreatedWhenAfterOtherMlIndex() throws Exception {
 
-        Auditor auditor = new Auditor(client(), "node_1");
+        AnomalyDetectionAuditor auditor = new AnomalyDetectionAuditor(client(), "node_1");
         auditor.info("whatever", "blah");
 
-        // Creating a document in the .ml-notifications index should cause .ml-annotations
+        // Creating a document in the .ml-notifications-000001 index should cause .ml-annotations
         // to be created, as it should get created as soon as any other ML index exists
 
         assertBusy(() -> {
@@ -67,7 +67,7 @@ public class AnnotationIndexIT extends MlSingleNodeTestCase {
     }
 
     private boolean annotationsIndexExists() {
-        return client().admin().indices().prepareExists(AnnotationIndex.INDEX_NAME).get().isExists();
+        return ESIntegTestCase.indexExists(AnnotationIndex.INDEX_NAME, client());
     }
 
     private int numberOfAnnotationsAliases() {

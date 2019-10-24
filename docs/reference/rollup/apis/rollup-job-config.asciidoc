@@ -13,7 +13,7 @@ should be grouped on, and what metrics to collect for each group.
 
 A full job configuration might look like this:
 
-[source,js]
+[source,console]
 --------------------------------------------------
 PUT _rollup/job/sensor
 {
@@ -24,7 +24,7 @@ PUT _rollup/job/sensor
     "groups" : {
       "date_histogram": {
         "field": "timestamp",
-        "interval": "60m",
+        "fixed_interval": "60m",
         "delay": "7d"
       },
       "terms": {
@@ -47,7 +47,6 @@ PUT _rollup/job/sensor
     ]
 }
 --------------------------------------------------
-// CONSOLE
 // TEST[setup:sensor_index]
 
 ==== Logistical Details
@@ -100,7 +99,7 @@ fields will then be available later for aggregating into buckets.  For example, 
 "groups" : {
   "date_histogram": {
     "field": "timestamp",
-    "interval": "60m",
+    "fixed_interval": "60m",
     "delay": "7d"
   },
   "terms": {

@@ -13,7 +13,6 @@ esplugin {
 archivesBaseName = 'x-pack-security'
 
 dependencies {
-    // "org.elasticsearch.plugin:x-pack-core:${version}" doesn't work with idea because the testArtifacts are also here
     compileOnly project(path: xpackModule('core'), configuration: 'default')
     compileOnly project(path: ':modules:transport-netty4', configuration: 'runtime')
     compileOnly project(path: ':plugins:transport-nio', configuration: 'runtime')
@@ -136,6 +135,11 @@ dependencies {
 compileJava.options.compilerArgs << "-Xlint:-rawtypes,-unchecked"
 compileTestJava.options.compilerArgs << "-Xlint:-rawtypes,-unchecked"
 
+processTestResources {
+    from(project(xpackModule('core')).file('src/main/config'))
+    from(project(xpackModule('core')).file('src/test/resources'))
+}
+
 configurations {
     testArtifacts.extendsFrom testRuntime
 }
@@ -144,14 +148,11 @@ task testJar(type: Jar) {
     from sourceSets.test.output
 }
 artifacts {
-    // normal es plugins do not publish the jar but we need to since users need it for Transport Clients and extensions
+    // normal es plugins do not publish the jar but we need to since users need it for extensions
     archives jar
     testArtifacts testJar
 }
-sourceSets.test.resources {
-    srcDir '../core/src/test/resources'
-    srcDir '../core/src/main/config'
-}
+
 dependencyLicenses {
     mapping from: /java-support|opensaml-.*/, to: 'shibboleth'
     mapping from: /http.*/, to: 'httpclient'
@@ -299,16 +300,18 @@ thirdPartyAudit.ignoreMissingClasses(
 )
 
 
-run {
-    plugin xpackModule('core')
-}
-
-unitTest {
+test {
     /*
      * We have to disable setting the number of available processors as tests in the same JVM randomize processors and will step on each
      * other if we allow them to set the number of available processors as it's set-once in Netty.
      */
     systemProperty 'es.set.netty.runtime.available.processors', 'false'
+
+    /*
+     * Some tests in this module set up a lot of transport threads so we reduce the buffer size per transport thread from the 1M default
+     * to keep direct memory usage under control.
+     */
+    systemProperty 'es.transport.buffer.size', '256k'
 }
 
 // xpack modules are installed in real clusters as the meta plugin, so
@@ -324,4 +327,3 @@ gradle.projectsEvaluated {
             .findAll { it.path.startsWith(project.path + ":qa") }
             .each { check.dependsOn it.check }
 }
-

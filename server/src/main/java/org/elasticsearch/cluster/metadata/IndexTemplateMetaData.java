@@ -20,7 +20,6 @@ package org.elasticsearch.cluster.metadata;
 
 import com.carrotsearch.hppc.cursors.ObjectCursor;
 import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
-import org.apache.logging.log4j.LogManager;
 import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.cluster.AbstractDiffable;
 import org.elasticsearch.cluster.Diff;
@@ -32,7 +31,6 @@ import org.elasticsearch.common.collect.MapBuilder;
 import org.elasticsearch.common.compress.CompressedXContent;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.logging.DeprecationLogger;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.set.Sets;
 import org.elasticsearch.common.xcontent.ToXContent;
@@ -40,7 +38,6 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.common.xcontent.XContentParser;
-import org.elasticsearch.index.mapper.MapperService;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -51,8 +48,6 @@ import java.util.Objects;
 import java.util.Set;
 
 public class IndexTemplateMetaData extends AbstractDiffable<IndexTemplateMetaData> {
-
-    private static final DeprecationLogger deprecationLogger = new DeprecationLogger(LogManager.getLogger(IndexTemplateMetaData.class));
 
     private final String name;
 
@@ -97,7 +92,7 @@ public class IndexTemplateMetaData extends AbstractDiffable<IndexTemplateMetaDat
         this.name = name;
         this.order = order;
         this.version = version;
-        this.patterns= patterns;
+        this.patterns = patterns;
         this.settings = settings;
         this.mappings = mappings;
         this.aliases = aliases;
@@ -227,7 +222,7 @@ public class IndexTemplateMetaData extends AbstractDiffable<IndexTemplateMetaDat
     public static class Builder {
 
         private static final Set<String> VALID_FIELDS = Sets.newHashSet(
-            "template", "order", "mappings", "settings", "index_patterns", "aliases", "version");
+            "order", "mappings", "settings", "index_patterns", "aliases", "version");
 
         private String name;
 
@@ -382,12 +377,10 @@ public class IndexTemplateMetaData extends AbstractDiffable<IndexTemplateMetaDat
                 if (includeTypeName == false) {
                     Map<String, Object> documentMapping = null;
                     for (ObjectObjectCursor<String, CompressedXContent> cursor : indexTemplateMetaData.mappings()) {
-                        if (!cursor.key.equals(MapperService.DEFAULT_MAPPING)) {
-                            assert documentMapping == null;
-                            byte[] mappingSource = cursor.value.uncompressed();
-                            Map<String, Object> mapping = XContentHelper.convertToMap(new BytesArray(mappingSource), true).v2();
-                            documentMapping = reduceMapping(cursor.key, mapping);
-                        }
+                        assert documentMapping == null;
+                        byte[] mappingSource = cursor.value.uncompressed();
+                        Map<String, Object> mapping = XContentHelper.convertToMap(new BytesArray(mappingSource), true).v2();
+                        documentMapping = reduceMapping(cursor.key, mapping);
                     }
 
                     if (documentMapping != null) {
@@ -487,11 +480,7 @@ public class IndexTemplateMetaData extends AbstractDiffable<IndexTemplateMetaDat
                         builder.patterns(index_patterns);
                     }
                 } else if (token.isValue()) {
-                    // Prior to 5.1.0, elasticsearch only supported a single index pattern called `template` (#21009)
-                    if("template".equals(currentFieldName)) {
-                        deprecationLogger.deprecated("Deprecated field [template] used, replaced by [index_patterns]");
-                        builder.patterns(Collections.singletonList(parser.text()));
-                    } else if ("order".equals(currentFieldName)) {
+                    if ("order".equals(currentFieldName)) {
                         builder.order(parser.intValue());
                     } else if ("version".equals(currentFieldName)) {
                         builder.version(parser.intValue());

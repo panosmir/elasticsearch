@@ -42,7 +42,6 @@
   - do:
       index:
         index: test
-        type:  doc
         id:    1
         body:  { "message": "a long message to make a periodic flush happen after this index operation" }
   - do:
@@ -54,8 +53,8 @@
 ---
 "Flush parameters validation":
   - skip:
-      version: " - 7.9.99"
-      reason: flush parameters validation is introduced in 8.0
+      version: " - 7.1.99"
+      reason: flush parameters validation is introduced in 7.2.0
   - do:
       indices.create:
         index: test

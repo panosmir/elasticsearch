@@ -86,7 +86,6 @@ public class CloseWhileRelocatingShardsIT extends ESIntegTestCase {
         return 3;
     }
 
-    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/39588")
     public void testCloseWhileRelocatingShards() throws Exception {
         final String[] indices = new String[randomIntBetween(3, 5)];
         final Map<String, Long> docsPerIndex = new HashMap<>();
@@ -105,7 +104,7 @@ public class CloseWhileRelocatingShardsIT extends ESIntegTestCase {
                     logger.debug("creating index {} with {} documents", indexName, nbDocs);
                     createIndex(indexName);
                     indexRandom(randomBoolean(), IntStream.range(0, nbDocs)
-                        .mapToObj(n -> client().prepareIndex(indexName, "_doc").setSource("num", n))
+                        .mapToObj(n -> client().prepareIndex(indexName).setSource("num", n))
                         .collect(Collectors.toList()));
                     break;
                 default:

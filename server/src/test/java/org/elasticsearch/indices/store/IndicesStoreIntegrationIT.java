@@ -74,7 +74,7 @@ import static org.hamcrest.Matchers.equalTo;
 public class IndicesStoreIntegrationIT extends ESIntegTestCase {
     @Override
     protected Settings nodeSettings(int nodeOrdinal) { // simplify this and only use a single data path
-        return Settings.builder().put(super.nodeSettings(nodeOrdinal)).put(Environment.PATH_DATA_SETTING.getKey(), "")
+        return Settings.builder().put(super.nodeSettings(nodeOrdinal)).put(Environment.PATH_DATA_SETTING.getKey(), createTempDir())
                 // by default this value is 1 sec in tests (30 sec in practice) but we adding disruption here
                 // which is between 1 and 2 sec can cause each of the shard deletion requests to timeout.
                 // to prevent this we are setting the timeout here to something highish ie. the default in practice
@@ -145,8 +145,8 @@ public class IndicesStoreIntegrationIT extends ESIntegTestCase {
                 .get();
         assertThat(clusterHealth.isTimedOut(), equalTo(false));
 
-        assertThat(waitForShardDeletion(node_1, index, 0), equalTo(false));
-        assertThat(waitForIndexDeletion(node_1, index), equalTo(false));
+        assertShardDeleted(node_1, index, 0);
+        assertIndexDeleted(node_1, index);
         assertThat(Files.exists(shardDirectory(node_2, index, 0)), equalTo(true));
         assertThat(Files.exists(indexDirectory(node_2, index)), equalTo(true));
         assertThat(Files.exists(shardDirectory(node_3, index, 0)), equalTo(true));
@@ -240,12 +240,13 @@ public class IndicesStoreIntegrationIT extends ESIntegTestCase {
         // it must still delete the shard, even if it cannot find it anymore in indicesservice
         client().admin().indices().prepareDelete("test").get();
 
-        assertThat(waitForShardDeletion(node_1, index, 0), equalTo(false));
-        assertThat(waitForIndexDeletion(node_1, index), equalTo(false));
+        assertShardDeleted(node_1, index, 0);
+        assertIndexDeleted(node_1, index);
         assertThat(Files.exists(shardDirectory(node_1, index, 0)), equalTo(false));
         assertThat(Files.exists(indexDirectory(node_1, index)), equalTo(false));
-        assertThat(waitForShardDeletion(node_2, index, 0), equalTo(false));
-        assertThat(waitForIndexDeletion(node_2, index), equalTo(false));
+
+        assertShardDeleted(node_2, index, 0);
+        assertIndexDeleted(node_2, index);
         assertThat(Files.exists(shardDirectory(node_2, index, 0)), equalTo(false));
         assertThat(Files.exists(indexDirectory(node_2, index)), equalTo(false));
     }
@@ -277,7 +278,7 @@ public class IndicesStoreIntegrationIT extends ESIntegTestCase {
         assertThat(clusterHealth.isTimedOut(), equalTo(false));
 
         logger.info("--> making sure that shard is not allocated on server3");
-        assertThat(waitForShardDeletion(node_3, index, 0), equalTo(false));
+        assertShardDeleted(node_3, index, 0);
 
         Path server2Shard = shardDirectory(node_2, index, 0);
         logger.info("--> stopping node {}", node_2);
@@ -308,7 +309,7 @@ public class IndicesStoreIntegrationIT extends ESIntegTestCase {
         logger.info("--> making sure that shard and its replica are allocated on server1 and server3 but not on server2");
         assertThat(Files.exists(shardDirectory(node_1, index, 0)), equalTo(true));
         assertThat(Files.exists(shardDirectory(node_3, index, 0)), equalTo(true));
-        assertThat(waitForShardDeletion(node_4, index, 0), equalTo(false));
+        assertShardDeleted(node_4, index, 0);
     }
 
     public void testShardActiveElsewhereDoesNotDeleteAnother() throws Exception {
@@ -335,8 +336,11 @@ public class IndicesStoreIntegrationIT extends ESIntegTestCase {
                 .put(EnableAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ENABLE_SETTING.getKey(), "none")));
 
         logger.debug("--> shutting down two random nodes");
-        internalCluster().stopRandomNode(InternalTestCluster.nameFilter(node1, node2, node3));
-        internalCluster().stopRandomNode(InternalTestCluster.nameFilter(node1, node2, node3));
+        List<String> nodesToShutDown = randomSubsetOf(2, node1, node2, node3);
+        Settings node1DataPathSettings = internalCluster().dataPathSettings(nodesToShutDown.get(0));
+        Settings node2DataPathSettings = internalCluster().dataPathSettings(nodesToShutDown.get(1));
+        internalCluster().stopRandomNode(InternalTestCluster.nameFilter(nodesToShutDown.get(0)));
+        internalCluster().stopRandomNode(InternalTestCluster.nameFilter(nodesToShutDown.get(1)));
 
         logger.debug("--> verifying index is red");
         ClusterHealthResponse health = client().admin().cluster().prepareHealth().setWaitForNodes("3").get();
@@ -369,7 +373,7 @@ public class IndicesStoreIntegrationIT extends ESIntegTestCase {
 
         logger.debug("--> starting the two old nodes back");
 
-        internalCluster().startDataOnlyNodes(2);
+        internalCluster().startNodes(node1DataPathSettings, node2DataPathSettings);
 
         assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes("5").get().isTimedOut());
 
@@ -450,7 +454,7 @@ public class IndicesStoreIntegrationIT extends ESIntegTestCase {
         waitNoPendingTasksOnAll();
         logger.info("Checking if shards aren't removed");
         for (int shard : node2Shards) {
-            assertTrue(waitForShardDeletion(nonMasterNode, index, shard));
+            assertShardExists(nonMasterNode, index, shard);
         }
     }
 
@@ -468,13 +472,18 @@ public class IndicesStoreIntegrationIT extends ESIntegTestCase {
         return paths[0];
     }
 
-    private boolean waitForShardDeletion(final String server, final Index index, final int shard) throws InterruptedException {
-        awaitBusy(() -> !Files.exists(shardDirectory(server, index, shard)));
-        return Files.exists(shardDirectory(server, index, shard));
+    private void assertShardDeleted(final String server, final Index index, final int shard) throws Exception {
+        final Path path = shardDirectory(server, index, shard);
+        assertBusy(() -> assertFalse("Expected shard to not exist: " + path, Files.exists(path)));
     }
 
-    private boolean waitForIndexDeletion(final String server, final Index index) throws InterruptedException {
-        awaitBusy(() -> !Files.exists(indexDirectory(server, index)));
-        return Files.exists(indexDirectory(server, index));
+    private void assertShardExists(final String server, final Index index, final int shard) throws Exception {
+        final Path path = shardDirectory(server, index, shard);
+        assertBusy(() -> assertTrue("Expected shard to exist: " + path, Files.exists(path)));
+    }
+
+    private void assertIndexDeleted(final String server, final Index index) throws Exception {
+        final Path path = indexDirectory(server, index);
+        assertBusy(() -> assertFalse("Expected index to be deleted: " + path, Files.exists(path)));
     }
 }

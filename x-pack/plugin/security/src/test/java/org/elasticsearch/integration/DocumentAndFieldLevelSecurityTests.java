@@ -398,9 +398,9 @@ public class DocumentAndFieldLevelSecurityTests extends SecurityIntegTestCase {
     }
 
     @SuppressWarnings("unchecked")
-    private static void assertExpectedFields(ImmutableOpenMap<String, ImmutableOpenMap<String, MappingMetaData>> mappings,
+    private static void assertExpectedFields(ImmutableOpenMap<String, MappingMetaData> mappings,
                                              String... fields) {
-        Map<String, Object> sourceAsMap = mappings.get("test").get("type1").getSourceAsMap();
+        Map<String, Object> sourceAsMap = mappings.get("test").getSourceAsMap();
         assertEquals(1, sourceAsMap.size());
         Map<String, Object> properties = (Map<String, Object>)sourceAsMap.get("properties");
         assertEquals(fields.length, properties.size());
@@ -410,7 +410,7 @@ public class DocumentAndFieldLevelSecurityTests extends SecurityIntegTestCase {
     }
 
     private static void assertExpectedFields(FieldCapabilitiesResponse fieldCapabilitiesResponse, String... expectedFields) {
-        Map<String, Map<String, FieldCapabilities>> responseMap = fieldCapabilitiesResponse.get();
+        Map<String, Map<String, FieldCapabilities>> responseMap = new HashMap<>(fieldCapabilitiesResponse.get());
         Set<String> builtInMetaDataFields = IndicesModule.getBuiltInMetaDataFields();
         for (String field : builtInMetaDataFields) {
             Map<String, FieldCapabilities> remove = responseMap.remove(field);
